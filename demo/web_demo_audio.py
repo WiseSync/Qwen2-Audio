@@ -1,11 +1,12 @@
 import gradio as gr
 import modelscope_studio as mgr
 import librosa
+import torch
 from transformers import AutoProcessor, Qwen2AudioForConditionalGeneration
 from argparse import ArgumentParser
 
-DEFAULT_CKPT_PATH = 'Qwen/Qwen2-Audio-7B-Instruct'
-
+DEFAULT_CKPT_PATH = '/Users/jon/NTNU Dropbox/WiseSync/NAS/Training/wsasr/v14-20241027-091300/checkpoint-1500'
+MAX_LEN = 8192
 
 def _get_args():
     parser = ArgumentParser()
@@ -16,7 +17,7 @@ def _get_args():
                         help="Automatically launch the interface in a new tab on the default browser.")
     parser.add_argument("--server-port", type=int, default=8000,
                         help="Demo server port.")
-    parser.add_argument("--server-name", type=str, default="127.0.0.1",
+    parser.add_argument("--server-name", type=str, default="0.0.0.0",
                         help="Demo server name.")
 
     args = parser.parse_args()
@@ -87,9 +88,9 @@ def predict(chatbot, task_history):
     print(f"{audios=}")
     inputs = processor(text=text, audios=audios, return_tensors="pt", padding=True)
     if not _get_args().cpu_only:
-        inputs["input_ids"] = inputs.input_ids.to("cuda")
+        inputs["input_ids"] = inputs.input_ids.to("mps")
 
-    generate_ids = model.generate(**inputs, max_length=256)
+    generate_ids = model.generate(**inputs, max_length=MAX_LEN)
     generate_ids = generate_ids[:, inputs.input_ids.size(1):]
 
     response = processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
@@ -107,27 +108,21 @@ def _launch_demo(args):
         gr.Markdown("""<center><font size=8>Qwen2-Audio-Instruct Bot</center>""")
         gr.Markdown(
             """\
-    <center><font size=3>This WebUI is based on Qwen2-Audio-Instruct, developed by Alibaba Cloud. \
-    (本WebUI基于Qwen2-Audio-Instruct打造，实现聊天机器人功能。)</center>""")
-        gr.Markdown("""\
-    <center><font size=4>Qwen2-Audio <a href="https://modelscope.cn/models/qwen/Qwen2-Audio-7B">🤖 </a> 
-    | <a href="https://huggingface.co/Qwen/Qwen2-Audio-7B">🤗</a>&nbsp ｜ 
-    Qwen2-Audio-Instruct <a href="https://modelscope.cn/models/qwen/Qwen2-Audio-7B-Instruct">🤖 </a> | 
-    <a href="https://huggingface.co/Qwen/Qwen2-Audio-7B-Instruct">🤗</a>&nbsp ｜ 
-    &nbsp<a href="https://github.com/QwenLM/Qwen2-Audio">Github</a></center>""")
+    <center><font size=3>本WebUI基於Joy Model打造，實現陪伴功能。</center>""")
         chatbot = mgr.Chatbot(label='Qwen2-Audio-7B-Instruct', elem_classes="control-height", height=750)
 
         user_input = mgr.MultimodalInput(
             interactive=True,
             sources=['microphone', 'upload'],
-            submit_button_props=dict(value="🚀 Submit (发送)"),
-            upload_button_props=dict(value="📁 Upload (上传文件)", show_progress=True),
+            submit_button_props=dict(value="🚀 Submit (送出)"),
+            upload_button_props=dict(value="📁 Upload (上傳檔案)", show_progress=True),
         )
-        task_history = gr.State([])
+        #task_history = gr.State([ {"role": "system", "content": "現在你是一個擁有豐富心理學知識的Joy醫生，我有一些心理問題，請你用專業的知識和溫柔的口吻幫我解決。"}])
+        task_history = gr.State([{"role": "system", "content": "You are a professional AI assistant specializing in automatic speech recognition."}])
 
         with gr.Row():
-            empty_bin = gr.Button("🧹 Clear History (清除历史)")
-            regen_btn = gr.Button("🤔️ Regenerate (重试)")
+            empty_bin = gr.Button("🧹 Clear History (清除歷史)")
+            regen_btn = gr.Button("🤔️ Regenerate (重試)")
 
         user_input.submit(fn=add_text,
                           inputs=[chatbot, task_history, user_input],
@@ -150,15 +145,16 @@ if __name__ == "__main__":
     if args.cpu_only:
         device_map = "cpu"
     else:
-        device_map = "auto"
+        device_map = "mps"
 
     model = Qwen2AudioForConditionalGeneration.from_pretrained(
         args.checkpoint_path,
-        torch_dtype="auto",
+        torch_dtype=torch.float16,
         device_map=device_map,
         resume_download=True,
     ).eval()
-    model.generation_config.max_new_tokens = 2048  # For chat.
+    model.generation_config.max_new_tokens = MAX_LEN  # For chat.
+    model.generation_config.temperature = 0.00001
     print("generation_config", model.generation_config)
-    processor = AutoProcessor.from_pretrained(args.checkpoint_path, resume_download=True)
+    processor = AutoProcessor.from_pretrained(args.checkpoint_path, resume_download=True, torch_dtype=torch.float16)
     _launch_demo(args)

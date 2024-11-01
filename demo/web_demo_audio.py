@@ -5,7 +5,7 @@ import torch
 from transformers import AutoProcessor, Qwen2AudioForConditionalGeneration
 from argparse import ArgumentParser
 
-DEFAULT_CKPT_PATH = '/Users/jon/NTNU Dropbox/WiseSync/NAS/Training/wsasr/v14-20241027-091300/checkpoint-1500'
+DEFAULT_CKPT_PATH = '/Users/jon/NTNU Dropbox/WiseSync/NAS/Training/wsasr/v16-20241031-111200/checkpoint-1500'
 MAX_LEN = 8192
 
 def _get_args():

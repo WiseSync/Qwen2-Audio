@@ -18,6 +18,9 @@ import traceback
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import platform
+import regex as re
+from itn.chinese.inverse_normalizer import InverseNormalizer
+from tn.chinese.normalizer import Normalizer as ZhNormalizer
 
 # 初始化 FastAPI 应用程序
 app = FastAPI()
@@ -29,6 +32,8 @@ processor = Wav2Vec2Processor.from_pretrained("jonatasgrosman/wav2vec2-large-xls
 model = Wav2Vec2ForCTC.from_pretrained("jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn").to(device)
 model.eval()
 
+zh_tn_model = ZhNormalizer(remove_erhua=False, remove_puncts=True, full_to_half=False, traditional_to_simple=False, remove_interjections=False, overwrite_cache=True)
+zh_itn_model = InverseNormalizer(enable_0_to_9=True, overwrite_cache=True)
 # 定义响应模型
 class WordSegment(BaseModel):
     start: float
@@ -40,7 +45,9 @@ class OutSegment(BaseModel):
     end: float
     words: list[WordSegment]
 
-# 定义转换时间的函数
+
+
+""" # 定义转换时间的函数
 def convertTime(timeStr):
     try:
         minutes, milliseconds = timeStr.split(',')
@@ -85,12 +92,12 @@ def parseSpeechSegments(input_text):
             segments.append(segment)
         else:
             raise ValueError(f"错误：第 {lineNumber} 行的格式不正确。Line: {line}")
-    return segments
+    return segments """
 
 # 转录函数
 def transcribe(data):
     try:
-        url = 'http://203.145.216.240:56523/v1/chat/completions'
+        url = 'http://203.145.216.172:54913/v1/chat/completions'
 
         headers = {
             'Content-Type': 'application/json'
@@ -107,7 +114,7 @@ def transcribe(data):
 
         if (isinstance(data.get('choices'), list) and len(data['choices']) > 0 and
                 isinstance(data['choices'][0]['message']['content'], str)):
-            return parseSpeechSegments(data['choices'][0]['message']['content'])
+            return data['choices'][0]['message']['content']
         else:
             raise Exception("Transcription error: " + str(data))
 
@@ -122,7 +129,27 @@ def base64_to_raw_data(data_uri):
     return audio_data
 
 def is_output_img():
-    return True
+    return False
+
+def split_text(text):
+    import re
+    # Define Chinese punctuation marks
+    chinese_punctuation = '。！？'
+    
+    # Define the regular expression pattern
+    pattern = (
+        fr'(?<=[{chinese_punctuation}])'  # 在中文句末标点符号后面分割
+        r'|(?<=[^\d\W])\.'               # 在非数字和非标点符号的字符后跟一个句号
+        r'(?!\d|[a-zA-Z]\.|\.{1,})\s*'   # 句号后面不是数字、小写字母加句号或连续的句号
+    )
+    
+    # 进行分割
+    segments = re.split(pattern, text)
+    
+    # 去除每个段落首尾的空白字符，并移除空字符串
+    segments = [s.strip() for s in segments if s.strip()]
+    
+    return segments
 
 # 主处理函数
 def process_audio(data):
@@ -169,19 +196,21 @@ def process_audio(data):
 
     #print(f"frame_shift: {frame_shift}")
 
-    # 调用转录函数
-    segments = transcribe(data)
-    #print(segments)
-
     # 合并文本
-    transcript = "".join([segment['text'] for segment in segments])
-    transcript_s = t2s.convert(transcript)
+    #transcript = "好，被撞擊而不幸身亡的蘇姓員警，他們家屬下午兩點來到了分駐所，進行招魂儀式。同袍也在門口列隊，要送他最後一程。詳細情況連線給記者林荷容、荷容。帶您來關注這起嫌犯開贓車撞死巡路員和員警的悲劇事件。就在今天下午的兩點，殉職員警的家屬也來到八堵的分駐所進行招魂儀式。可以看到門口兩兩排刑員警呢，都是…"
+    transcript = transcribe(data)
+    texts = split_text(transcript)
+    segments = [{'normalized': zh_tn_model.normalize(text),'inversed': '', 'simpleNormalized':'','text':text} for text in texts]
+    
+    for segment in segments:
+        segment['inversed'] = zh_itn_model.normalize(segment['text'])
+        segment['simpleNormalized'] = t2s.convert(segment['normalized'])
 
     table = []
-    count = 0    
+    transcript_s = ""   
     for i in range(len(segments)):
-        transcript += segments[i]['text']
-        for j in range(len(segments[i]['text'])):
+        transcript_s += segments[i]['simpleNormalized']
+        for j in range(len(segments[i]['simpleNormalized'])):
             table.append((i, j))
 
     # 将简体中文文本编码为 tokens
@@ -206,7 +235,7 @@ def process_audio(data):
         targets=targets,
         blank=processor.tokenizer.pad_token_id  # 通常 blank_id 为 0
     )
-
+    #print(f"Alignment scores: {scores}, {scores.shape}", {len(alignment[0])}, {len(labels)})
     # 获取 tokenizer 的 tokens
     tokens = processor.tokenizer.convert_ids_to_tokens(labels)
 
@@ -214,6 +243,7 @@ def process_audio(data):
     alignment = alignment[0].cpu().numpy()
     words = []
     current_token_id = None
+    current_idx = None
     start_time = 0
     token_index = 0
 
@@ -224,10 +254,14 @@ def process_audio(data):
                 token = tokens[token_index]
                 if(token != transcript_s[token_index] and not(token == '|' and transcript_s[token_index] == ' ')):
                     print(f"Warning: {token} != {transcript_s[token_index]}")
-                i, h = table[token_index]      
-                words.append((start_time, end_time, segments[i]['text'][h], i))
+                i, h = table[token_index]
+                log_probs = emission[0][current_idx, current_token_id]
+                # 计算平均概率作为置信度
+                confidence = np.exp(log_probs).mean()      
+                words.append((start_time, end_time, segments[i]['normalized'][h], confidence, i))
                 token_index += 1
             current_token_id = token_id
+            current_idx = idx
             start_time = idx * frame_shift
 
     # 处理最后一个 token
@@ -236,30 +270,37 @@ def process_audio(data):
         token = tokens[token_index]
         if(token != transcript_s[token_index] and not(token == '|' and transcript_s[token_index] == ' ')):
             print(f"Warning: {token} != {transcript_s[token_index]}")
-        i, h = table[token_index]      
-        words.append((start_time, end_time, segments[i]['text'][h], i))
+        i, h = table[token_index]
+        log_probs = emission[0][current_idx, current_token_id]
+        # 计算平均概率作为置信度
+        confidence = np.exp(log_probs).mean()        
+        words.append((start_time, end_time, segments[i]['normalized'][h], log_probs,i))
         token_index += 1
+    #print(words)
 
     # 将 words 按 segments 分组
     outSegments = [{'start':0,'end':0,'words':[]} for _ in range(len(segments))]
     word_index = 0
     for i, segment in enumerate(segments):
         segment_words = []
-        while word_index < len(words) and words[word_index][2] in segment['text']:
+        while word_index < len(words) and words[word_index][2] in segment['normalized']:
             segment_words.append({
                 'start': words[word_index][0],
                 'end': words[word_index][1],
-                'word': words[word_index][2]
+                'word': words[word_index][2],
+                'confidence': words[word_index][3].item()
             })
             word_index += 1
         if segment_words:
             outSegments[i]['start'] = segment_words[0]['start']
             outSegments[i]['end'] = segment_words[-1]['end']
             outSegments[i]['words'] = segment_words
+            outSegments[i]['text'] = segment['inversed']
         else:
             # 如果没有匹配的词，使用 segment 的开始和结束时间
-            outSegments[i]['start'] = segment['startSeconds']
-            outSegments[i]['end'] = segment['endSeconds']
+            outSegments[i]['start'] = 0
+            outSegments[i]['end'] = 0
+            outSegments[i]['text'] = segment['inversed']
 
     if is_output_img():
         # 创建时间轴
@@ -270,12 +311,14 @@ def process_audio(data):
         plt.plot(xtime, waveform.numpy(), label='Waveform')
 
         # 在波形上标注对齐结果
-        for start_time, end_time, token, i in words:
+        for start_time, end_time, token, score,i in words:
             # 绘制对齐区间
             plt.axvspan(start_time, end_time, color='green', alpha=0.3)
             # 在区间中间位置标注文本
             plt.text((start_time + end_time) / 2, np.max(waveform.numpy()) * 0.8, token,
                     horizontalalignment='center', fontsize=8, color='red')
+            plt.text((start_time + end_time) / 2, -np.max(waveform.numpy()) * 0.8, f"{score:.2f}",
+                    horizontalalignment='center', fontsize=6, color='red')
 
         plt.xlabel('Time (s)')
         plt.ylabel('Amplitude')
@@ -292,10 +335,10 @@ def process_audio(data):
 @app.post("/speech2text")
 async def speech_to_text(request: Request):
     try:
-        start_time = time.time()
+        #start_time = time.time()
         data = await request.json()
         outSegments = process_audio(data)
-        print(f"Time elapsed: {time.time() - start_time}")
+        #print(f"Time elapsed: {time.time() - start_time}")
         return JSONResponse(content={"segments": outSegments})
     except Exception as e:
         print(str(e))

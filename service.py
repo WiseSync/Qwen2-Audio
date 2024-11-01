@@ -39,65 +39,18 @@ class WordSegment(BaseModel):
     start: float
     end: float
     word: str
+    confidence: float
 
 class OutSegment(BaseModel):
     start: float
     end: float
+    text: str
     words: list[WordSegment]
-
-
-
-""" # 定义转换时间的函数
-def convertTime(timeStr):
-    try:
-        minutes, milliseconds = timeStr.split(',')
-        minutes = int(minutes)
-        milliseconds = int(milliseconds)
-        if minutes < 0 or milliseconds < 0 or milliseconds >= 1000:
-            return None  # 转换失败
-        seconds = minutes * 60.0 + milliseconds / 1000.0
-        return seconds
-    except ValueError:
-        return None  # 解析失败
-
-# 解析转录文本的函数
-def parseSpeechSegments(input_text):
-    segments = []
-    regex_pattern = r'(\d{2},\d{3})\s->\s(\d{2},\d{3})\s(.+)'
-    lineNumber = 0
-    lines = input_text.strip().split('\n')
-    for line in lines:
-        lineNumber += 1
-        if not line.strip():
-            continue
-        match = re.match(regex_pattern, line)
-        if match:
-            startStr = match.group(1)
-            endStr = match.group(2)
-            text = match.group(3)
-            startSeconds = convertTime(startStr)
-            if startSeconds is None:
-                raise ValueError(f"错误：第 {lineNumber} 行的开始时间格式错误（{startStr}）。")
-            endSeconds = convertTime(endStr)
-            if endSeconds is None:
-                raise ValueError(f"错误：第 {lineNumber} 行的结束时间格式错误（{endStr}）。")
-            segment = {
-                'startStr': startStr,
-                'endStr': endStr,
-                'text': text,
-                'startSeconds': startSeconds,
-                'endSeconds': endSeconds,
-                'lineNumber': lineNumber
-            }
-            segments.append(segment)
-        else:
-            raise ValueError(f"错误：第 {lineNumber} 行的格式不正确。Line: {line}")
-    return segments """
 
 # 转录函数
 def transcribe(data):
     try:
-        url = 'http://203.145.216.172:54913/v1/chat/completions'
+        url = 'http://127.0.0.1:5000/v1/chat/completions'
 
         headers = {
             'Content-Type': 'application/json'
@@ -134,7 +87,7 @@ def is_output_img():
 def split_text(text):
     import re
     # Define Chinese punctuation marks
-    chinese_punctuation = '。！？'
+    chinese_punctuation = '，。！？;；'
     
     # Define the regular expression pattern
     pattern = (
@@ -246,7 +199,7 @@ def process_audio(data):
     current_idx = None
     start_time = 0
     token_index = 0
-
+    emission = emission.cpu()
     for idx, token_id in enumerate(alignment):
         if token_id != current_token_id:
             if current_token_id is not None and current_token_id != processor.tokenizer.pad_token_id:

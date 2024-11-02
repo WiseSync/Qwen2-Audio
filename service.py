@@ -1,12 +1,10 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import torch
 import torchaudio
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 import numpy as np
-import time
-import opencc
 import base64
 import requests
 import io
@@ -21,15 +19,15 @@ import platform
 import regex as re
 from itn.chinese.inverse_normalizer import InverseNormalizer
 from tn.chinese.normalizer import Normalizer as ZhNormalizer
+import logging
 
 # 初始化 FastAPI 应用程序
 app = FastAPI()
 
 # 初始化模型等全局变量
-t2s = opencc.OpenCC('tw2s')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-processor = Wav2Vec2Processor.from_pretrained("jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn")
-model = Wav2Vec2ForCTC.from_pretrained("jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn").to(device)
+processor = Wav2Vec2Processor.from_pretrained("ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt")
+model = Wav2Vec2ForCTC.from_pretrained("ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt").to(device)
 model.eval()
 
 zh_tn_model = ZhNormalizer(remove_erhua=False, remove_puncts=True, full_to_half=False, traditional_to_simple=False, remove_interjections=False, overwrite_cache=True)
@@ -72,7 +70,7 @@ def transcribe(data):
             raise Exception("Transcription error: " + str(data))
 
     except Exception as error:
-        print('Error:', error)
+        logging.warning('Error:', error)
         raise error
 
 # 将 base64 数据转换为原始音频数据
@@ -153,17 +151,16 @@ def process_audio(data):
     #transcript = "好，被撞擊而不幸身亡的蘇姓員警，他們家屬下午兩點來到了分駐所，進行招魂儀式。同袍也在門口列隊，要送他最後一程。詳細情況連線給記者林荷容、荷容。帶您來關注這起嫌犯開贓車撞死巡路員和員警的悲劇事件。就在今天下午的兩點，殉職員警的家屬也來到八堵的分駐所進行招魂儀式。可以看到門口兩兩排刑員警呢，都是…"
     transcript = transcribe(data)
     texts = split_text(transcript)
-    segments = [{'normalized': zh_tn_model.normalize(text),'inversed': '', 'simpleNormalized':'','text':text} for text in texts]
+    segments = [{'normalized': zh_tn_model.normalize(text),'inversed':'', 'text':text} for text in texts]
     
     for segment in segments:
         segment['inversed'] = zh_itn_model.normalize(segment['text'])
-        segment['simpleNormalized'] = t2s.convert(segment['normalized'])
 
     table = []
     transcript_s = ""   
     for i in range(len(segments)):
-        transcript_s += segments[i]['simpleNormalized']
-        for j in range(len(segments[i]['simpleNormalized'])):
+        transcript_s += segments[i]['normalized']
+        for j in range(len(segments[i]['normalized'])):
             table.append((i, j))
 
     # 将简体中文文本编码为 tokens
@@ -206,12 +203,12 @@ def process_audio(data):
                 end_time = idx * frame_shift
                 token = tokens[token_index]
                 if(token != transcript_s[token_index] and not(token == '|' and transcript_s[token_index] == ' ')):
-                    print(f"Warning: {token} != {transcript_s[token_index]}")
+                    logging.error(f"Warning: {token} != {transcript_s[token_index]}")
                 i, h = table[token_index]
                 log_probs = emission[0][current_idx, current_token_id]
                 # 计算平均概率作为置信度
                 confidence = np.exp(log_probs).mean()      
-                words.append((start_time, end_time, segments[i]['normalized'][h], confidence, i))
+                words.append((start_time, end_time, transcript_s[token_index], confidence, i))
                 token_index += 1
             current_token_id = token_id
             current_idx = idx
@@ -222,12 +219,12 @@ def process_audio(data):
         end_time = len(alignment) * frame_shift
         token = tokens[token_index]
         if(token != transcript_s[token_index] and not(token == '|' and transcript_s[token_index] == ' ')):
-            print(f"Warning: {token} != {transcript_s[token_index]}")
+            logging.error(f"Warning: {token} != {transcript_s[token_index]}")
         i, h = table[token_index]
         log_probs = emission[0][current_idx, current_token_id]
         # 计算平均概率作为置信度
         confidence = np.exp(log_probs).mean()        
-        words.append((start_time, end_time, segments[i]['normalized'][h], log_probs,i))
+        words.append((start_time, end_time, transcript_s[token_index], log_probs,i))
         token_index += 1
     #print(words)
 
@@ -294,7 +291,7 @@ async def speech_to_text(request: Request):
         #print(f"Time elapsed: {time.time() - start_time}")
         return JSONResponse(content={"segments": outSegments})
     except Exception as e:
-        print(str(e))
+        logging.warning(str(e))
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

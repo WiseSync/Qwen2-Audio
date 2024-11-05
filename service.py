@@ -27,8 +27,8 @@ app = FastAPI()
 # 初始化模型等全局变量
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-zh_tn_model = ZhNormalizer(remove_erhua=False, remove_puncts=True, full_to_half=False, traditional_to_simple=False, remove_interjections=False, overwrite_cache=True, cache_dir='cache/tn/normalizer')
-zh_itn_model = InverseNormalizer(enable_0_to_9=False, overwrite_cache=True, cache_dir='cache/tn/inverse')
+zh_tn_model = ZhNormalizer(remove_erhua=False, remove_puncts=True, full_to_half=False, traditional_to_simple=False, remove_interjections=False,cache_dir='cache/tn/normalizer')
+zh_itn_model = InverseNormalizer(enable_0_to_9=False,cache_dir='cache/tn/inverse')
 
 processor = Wav2Vec2Processor.from_pretrained("ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt",torch_dtype=torch.float16)
 model = Wav2Vec2ForCTC.from_pretrained("ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt",torch_dtype=torch.float16,device_map=device)

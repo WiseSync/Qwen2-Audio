@@ -33,4 +33,5 @@ configs/HDLC/gml/*.yaml
 sessions/*
 test.jpg
 images/*
+cache/
 

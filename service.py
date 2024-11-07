@@ -47,10 +47,92 @@ class OutSegment(BaseModel):
     text: str
     words: list[WordSegment]
 
+import re
+
+def replace_timestamps(text):
+    # 定义正则表达式模式，匹配行首的时间戳格式：数字,数字 -> 数字,数字
+    pattern = r'^(?:\s*)(\d{2},\d{3}\s*->\s*\d{2},\d{3})(\s*)'
+    
+    # 使用 splitlines 保留行尾的换行符
+    lines = text.splitlines(keepends=True)
+    
+    # 用于跟踪是否是第一处时间戳
+    first_timestamp = True
+    
+    # 存储处理后的行
+    new_lines = []
+    
+    for line in lines:
+        # 检查行首是否有时间戳
+        match = re.match(pattern, line)
+        if match:
+            if first_timestamp:
+                # 第一处时间戳，替换为空字符串
+                new_line = re.sub(pattern, '', line, count=1)
+                first_timestamp = False
+            else:
+                # 其他时间戳，替换为句号
+                # 保留时间戳后面的空白字符（如空格或制表符）
+                new_line = re.sub(pattern, '。', line, count=1)
+            if(new_line[-1] == '\n'):
+                new_line = new_line[:-1]
+            else:
+                new_line += '。'
+            new_lines.append(new_line)
+        else:
+            # 行首没有时间戳，直接添加
+            new_lines.append(line)
+    
+    # 将处理后的行重新组合成字符串
+    result = ''.join(new_lines)
+    return result
+def remove_repeated_phrases(text):
+    # 移除句子末尾的空白字符
+    text = text.rstrip()
+
+    max_phrase_length = 30  # 最大短语长度，可根据需要调整
+    min_repeats = 5  # 最小重复次数
+
+    # 获取文本长度
+    text_length = len(text)
+
+    # 计算可能的最大短语长度，防止越界
+    max_possible_length = min(max_phrase_length, text_length // min_repeats)
+
+    # 从短语长度为 1 开始，逐渐增加
+    for phrase_length in range(1, max_possible_length + 1):
+        # 获取末尾的短语
+        phrase = text[-phrase_length:]
+        # 构建重复的短语
+        repeated_phrase = phrase * min_repeats
+        # 检查文本是否以重复的短语结尾
+        if text.endswith(repeated_phrase):
+            # 使用正则表达式查找重复的部分
+            pattern = f'({re.escape(phrase)}){{{min_repeats},}}$'
+            match = re.search(pattern, text)
+            if match:
+                # 将重复的部分替换为单个短语
+                text = text[:match.start()] + ''
+                ntlen = len(text)
+                plen = len(phrase)
+                index = None
+                for i in range(0, plen):
+                    if(text[ntlen-i-1] == phrase[plen-i-1]):
+                        index = i
+                        continue
+                    else:
+                        break
+                if(index != None):
+                    text = text+phrase[:-index-1]
+                return text
+
+    # 如果未找到重复的短语，返回原文本
+    return text
+
 # 转录函数
 def transcribe(data):
     try:
-        url = 'http://127.0.0.1:5000/v1/chat/completions'
+        url = 'http://203.145.216.206:53628/v1/chat/completions'
 
         headers = {
             'Content-Type': 'application/json'
@@ -67,7 +149,10 @@ def transcribe(data):
 
         if (isinstance(data.get('choices'), list) and len(data['choices']) > 0 and
                 isinstance(data['choices'][0]['message']['content'], str)):
-            return data['choices'][0]['message']['content']
+            removed_timestamps =  replace_timestamps(data['choices'][0]['message']['content'])
+            removed_repeats = remove_repeated_phrases(removed_timestamps)
+
+            return removed_repeats
         else:
             raise Exception("Transcription error: " + str(data))
 
@@ -317,7 +402,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port',
                         type=int,
-                        default=5000)
+                        default=5001)
     args = parser.parse_args()
     # 启动服务器
     uvicorn.run(app, host='0.0.0.0', port=args.port)

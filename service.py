@@ -29,9 +29,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 zh_tn_model = ZhNormalizer(remove_erhua=False, remove_puncts=True, full_to_half=False, traditional_to_simple=False, remove_interjections=False,cache_dir='cache/tn/normalizer')
 zh_itn_model = InverseNormalizer(enable_0_to_9=False,cache_dir='cache/tn/inverse')
-
-processor = Wav2Vec2Processor.from_pretrained("ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt",torch_dtype=torch.float16)
-model = Wav2Vec2ForCTC.from_pretrained("ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt",torch_dtype=torch.float16,device_map=device)
+model_path = '/workspace/Models/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt'
+dtype = torch.float16
+processor = Wav2Vec2Processor.from_pretrained(model_path,torch_dtype=dtype)
+model = Wav2Vec2ForCTC.from_pretrained(model_path,torch_dtype=dtype,device_map=device)
 model.eval()
 
 # 定义响应模型
@@ -132,7 +133,7 @@ def remove_repeated_phrases(text):
 # 转录函数
 def transcribe(data):
     try:
-        url = 'http://203.145.216.206:53628/v1/chat/completions'
+        url = 'http://0.0.0.0:5000/v1/chat/completions'
 
         headers = {
             'Content-Type': 'application/json'
@@ -255,7 +256,7 @@ def process_audio(data):
 
     # 准备输入
     inputs = processor(waveform, sampling_rate=sample_rate, return_tensors="pt", padding=True)
-    inputs = inputs.to(dtype=torch.float16).to(device)
+    inputs = inputs.to(dtype=dtype).to(device)
     targets = torch.tensor(labels, dtype=torch.int32).unsqueeze(0).to(device)
 
     # 获取发射矩阵

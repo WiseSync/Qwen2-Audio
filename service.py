@@ -145,7 +145,7 @@ def transcribe(data):
         payload = data
 
         response = requests.post(url, headers=headers, json=payload)
-
+        #print(payload)
         if not response.ok:
             raise Exception(f"HTTP error! status: {response.status_code}")
 
@@ -153,8 +153,8 @@ def transcribe(data):
 
         if (isinstance(data.get('choices'), list) and len(data['choices']) > 0 and
                 isinstance(data['choices'][0]['message']['content'], str)):
-            removed_timestamps =  replace_timestamps(data['choices'][0]['message']['content'])
-            removed_repeats = remove_repeated_phrases(removed_timestamps)
+            #removed_timestamps =  replace_timestamps(data['choices'][0]['message']['content'])
+            removed_repeats = remove_repeated_phrases(data['choices'][0]['message']['content'])
 
             return removed_repeats
         else:

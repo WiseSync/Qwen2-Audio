@@ -29,7 +29,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 zh_tn_model = ZhNormalizer(remove_erhua=False, remove_puncts=True, full_to_half=False, traditional_to_simple=False, remove_interjections=False,cache_dir='cache/tn/normalizer')
 zh_itn_model = InverseNormalizer(enable_0_to_9=False,cache_dir='cache/tn/inverse')
-model_path = '/workspace/Models/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt'
+model_path = '/Users/jon/NTNU Dropbox/WiseSync/NAS/Models/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt'
+#model_path = '/workspace/Models/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt'
 dtype = torch.float16
 processor = Wav2Vec2Processor.from_pretrained(model_path,torch_dtype=dtype)
 model = Wav2Vec2ForCTC.from_pretrained(model_path,torch_dtype=dtype,device_map=device)
@@ -137,7 +138,7 @@ def remove_repeated_phrases(text):
 # 转录函数
 def transcribe(data):
     try:
-        url = 'http://0.0.0.0:5000/v1/chat/completions'
+        url = 'https://03peya5c264odq-5000.proxy.runpod.net/v1/chat/completions'
 
         headers = {
             'Content-Type': 'application/json'
@@ -289,34 +290,53 @@ def process_audio(data):
     start_time = 0
     token_index = 0
     emission = emission.cpu()
+    transcribe_index = 0
     for idx, token_id in enumerate(alignment):
         if token_id != current_token_id:
             if current_token_id is not None and current_token_id != processor.tokenizer.pad_token_id:
                 end_time = idx * frame_shift
                 token = tokens[token_index]
-                if(token != transcript_s[token_index] and not(token == '|' and transcript_s[token_index] == ' ')):
-                    logging.error(f"Warning: {token} != {transcript_s[token_index]}")
+                text = ''
+                while len(text.replace(' ', ''))<len(token) and transcribe_index < len(transcript_s):
+                    if token == '[UNK]':
+                        text+= transcript_s[transcribe_index]
+                        transcribe_index += 1
+                        break
+                    text += transcript_s[transcribe_index]
+                    transcribe_index += 1
+                if(len(text)<=0):
+                    logging.error(f"Warning: {token} != {text}")
                 i, h = table[token_index]
                 log_probs = emission[0][current_idx, current_token_id]
                 # 计算平均概率作为置信度
-                confidence = np.exp(log_probs).mean()      
-                words.append((start_time, end_time, transcript_s[token_index], confidence, i))
+                confidence = np.exp(log_probs).mean()
+                #print(f"Token: {token}, Text: {text}, Confidence: {confidence}")       
+                words.append((start_time, end_time, text, confidence, i))
                 token_index += 1
             current_token_id = token_id
             current_idx = idx
             start_time = idx * frame_shift
-
     # 处理最后一个 token
     if current_token_id != processor.tokenizer.pad_token_id and token_index < len(tokens):
         end_time = len(alignment) * frame_shift
         token = tokens[token_index]
-        if(token != transcript_s[token_index] and not(token == '|' and transcript_s[token_index] == ' ')):
-            logging.error(f"Warning: {token} != {transcript_s[token_index]}")
+        text = ''
+        while len(text.replace(' ', ''))<len(token) and transcribe_index < len(transcript_s):
+            if token == '[UNK]':
+                text+= transcript_s[transcribe_index]
+                transcribe_index += 1
+                break
+            text += transcript_s[transcribe_index]
+            transcribe_index += 1
+        if(len(text)<=0):
+            logging.error(f"Warning: {token} != {text}")
         i, h = table[token_index]
         log_probs = emission[0][current_idx, current_token_id]
         # 计算平均概率作为置信度
-        confidence = np.exp(log_probs).mean()        
-        words.append((start_time, end_time, transcript_s[token_index], log_probs,i))
+        confidence = np.exp(log_probs).mean()
+        #Check if the last token is a [UNK] or not
+        #print(f"Token: {token}, Text: {text}, Confidence: {confidence}")         
+        words.append((start_time, end_time, text, log_probs,i))
         token_index += 1
     #print(words)
 

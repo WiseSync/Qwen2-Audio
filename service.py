@@ -50,7 +50,7 @@ class OutSegment(BaseModel):
 
 import re
 
-def replace_timestamps(text):
+""" def replace_timestamps(text):
     #print(text)
     # 定义正则表达式模式，匹配行首的时间戳格式：数字,数字 -> 数字,数字
     pattern = r'^(?:\s*)(\d+(?:,\d+)?\s*->\s*\d+(?:,\d+)?)(\s*)'
@@ -89,7 +89,8 @@ def replace_timestamps(text):
     result = ''.join(new_lines)
     pattern2 = r'(?:\d+(?:,{1,2}\d+)?\s*->\s*)+\d+(?:,{1,2}\d+)?'
     result = re.sub(pattern2, r'', result)
-    return result
+    return result """
+
 def remove_repeated_phrases(text):
     # 移除句子末尾的空白字符
     text = text.rstrip()
